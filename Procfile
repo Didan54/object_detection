@@ -1,1 +1,1 @@
-worker: python esp32cam.py
+worker: bash start.sh
