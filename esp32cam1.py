@@ -1,126 +1,139 @@
-# import os
-# import json
-# import time
-# from datetime import datetime
-# from supabase import create_client
-# import requests
-# import cv2
-# import numpy as np
-# from ultralytics import YOLO
-# from collections import Counter
-# import websocket
-# import threading
+import os
+import cv2
+import glob
+from collections import Counter
+from datetime import datetime
+from ultralytics import YOLO
 
-# # --- KONFIGURASI ---
-# SUPABASE_URL = "https://wxkoqtcvkwduzfejtxib.supabase.co"
-# SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind4a29xdGN2a3dkdXpmZWp0eGliIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDIzNzcyNCwiZXhwIjoyMDc1ODEzNzI0fQ.ZAJBuiPV_FsNIQwiK40wZQ1vWLXzs-fMxFTEmYJUsqc"
-# BUCKET_NAME = "gambar-hasil-deteksi"
-# YOLO_MODEL_PATH = "best .pt"
-# OUTPUT_FOLDER = "hasil_deteksi"
+# --- KONFIGURASI (SESUAIKAN) ---
+YOLO_MODEL_PATH = "best.pt" # Pastikan nama file model .pt Anda benar
+INPUT_FOLDER = "input"
+OUTPUT_FOLDER = "output_uji_coba" # Folder output berbeda agar tidak tercampur
+CONFIDENCE_THRESHOLD = 0.5 # Minimal tingkat kepercayaan untuk menampilkan deteksi (misal 0.5 = 50%)
 
-# # --- INISIALISASI ---
-# supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-# model = YOLO(YOLO_MODEL_PATH)
-# os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+# --- WARNA UNTUK MASING-MASING KELAS (BGR Format) ---
+# Pastikan urutan dan nama kelas ini sesuai dengan model Anda!
+# Cek urutan ID dari file data.yaml Anda (ID 0, ID 1, dst.)
+# Contoh (Sesuaikan dengan kelas Anda):
+# ID 0: 'bercak_daun'
+# ID 1: 'daun_kuning'
+# ID 2: 'daun_sehat'
+# ID 3: 'jamur_putih'
+# ID 4: 'kerusakan_hama'
+COLOR_MAP = {
+    0: (255, 255, 0),    # Biru muda untuk ID 0 (bercak_daun)
+    1: (0, 255, 255),    # Kuning untuk ID 1 (daun_kuning)
+    2: (0, 255, 0),      # Hijau untuk ID 2 (daun_sehat)
+    3: (255, 0, 255),    # Ungu untuk ID 3 (jamur_putih)
+    4: (0, 0, 255)       # Merah untuk ID 4 (kerusakan_hama)
+}
+DEFAULT_COLOR = (255, 255, 255) # Putih jika ID kelas tidak ditemukan
 
-# # --- FUNGSI PENDUKUNG ---
-# def process_image(job):
-#     """Proses gambar saat ada insert baru."""
-#     try:
-#         job_id = job["id"]
-#         image_url = job["image_url"]
-#         print(f"\n📸 Gambar baru diterima (ID {job_id})")
+# --- FUNGSI ---
 
-#         # Update status ke 'memproses'
-#         supabase.table("gambar_hama").update({"status": "memproses"}).eq("id", job_id).execute()
+def load_yolo_model():
+    """Memuat model YOLO."""
+    if not os.path.exists(YOLO_MODEL_PATH):
+        print(f"❌ File model '{YOLO_MODEL_PATH}' tidak ditemukan!")
+        print("   Pastikan file model (.pt) ada di folder yang sama.")
+        return None
+    try:
+        model = YOLO(YOLO_MODEL_PATH)
+        print(f"✅ Model YOLO '{YOLO_MODEL_PATH}' berhasil dimuat.")
+        print(f"   Nama Kelas Model: {model.names}")
+        return model
+    except Exception as e:
+        print(f"❌ Gagal memuat model YOLO: {e}")
+        return None
 
-#         img_response = requests.get(image_url, timeout=20)
-#         img_response.raise_for_status()
-#         image_np = cv2.imdecode(np.frombuffer(img_response.content, np.uint8), cv2.IMREAD_COLOR)
+def test_single_image(model, image_path):
+    """Memproses satu gambar untuk deteksi dan menyimpan hasilnya."""
+    print(f"\n🔍 Menguji gambar: {os.path.basename(image_path)}")
+    
+    image_np = cv2.imread(image_path)
+    if image_np is None:
+        print("   ❌ Gagal membaca gambar.")
+        return
 
-#         results = model.predict(image_np, conf=0.5, verbose=False)
-#         annotated_img = results[0].plot(font_size=15)
+    # Jalankan prediksi
+    results = model.predict(image_np, conf=CONFIDENCE_THRESHOLD, verbose=False)
+    
+    # Salin gambar asli untuk dianotasi
+    annotated_image = image_np.copy()
+    detected_classes = []
 
-#         detected_objects = [
-#             {"nama": model.names[int(b.cls[0])], "akurasi": float(b.conf[0])}
-#             for b in results[0].boxes
-#         ]
-#         detection_counts = Counter(obj["nama"] for obj in detected_objects)
+    if results and results[0].boxes:
+        boxes = results[0].boxes
+        for box in boxes:
+            # Dapatkan data deteksi
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            class_id = int(box.cls[0])
+            class_name = model.names.get(class_id, "Unknown")
+            confidence = float(box.conf[0])
+            
+            detected_classes.append(class_name) # Kumpulkan nama kelas yang terdeteksi
+            
+            # Pilih warna berdasarkan class_id
+            color = COLOR_MAP.get(class_id, DEFAULT_COLOR)
+            
+            label = f"{class_name} {confidence:.2f}"
+            
+            # Gambar kotak
+            cv2.rectangle(annotated_image, (x1, y1), (x2, y2), color, 2)
+            
+            # Gambar teks (ukuran font lebih kecil)
+            font_scale = 0.5
+            font_thickness = 1
+            (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+            cv2.rectangle(annotated_image, (x1, y1 - h - 5), (x1 + w, y1), color, -1) # Latar teks
+            cv2.putText(annotated_image, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), font_thickness, cv2.LINE_AA) # Teks hitam
 
-#         # Simpan hasil gambar
-#         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-#         filename = f"hasil_{timestamp}_{job_id}.jpg"
-#         local_path = os.path.join(OUTPUT_FOLDER, filename)
-#         cv2.imwrite(local_path, annotated_img)
+    # Simpan gambar hasil anotasi
+    os.makedirs(OUTPUT_FOLDER, exist_ok=True) # Buat folder output jika belum ada
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = os.path.basename(image_path)
+    output_filename = f"{timestamp}_TEST_{filename}"
+    output_path = os.path.join(OUTPUT_FOLDER, output_filename)
+    cv2.imwrite(output_path, annotated_image)
+    print(f"   ✅ Hasil anotasi disimpan di: {output_path}")
 
-#         # Upload ke storage
-#         with open(local_path, "rb") as f:
-#             supabase.storage.from_(BUCKET_NAME).upload(f"hasil_deteksi/{filename}", f, file_options={"content-type": "image/jpeg"})
+    # Tampilkan ringkasan deteksi di konsol
+    detection_counts = Counter(detected_classes)
+    print("   --- RINGKASAN DETEKSI ---")
+    if not detection_counts:
+        print("   Tidak ada objek terdeteksi.")
+    else:
+        print(f"   TOTAL DETEKSI: {len(detected_classes)}")
+        for class_name, count in detection_counts.items():
+            print(f"     - {class_name}: {count}")
 
-#         public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(f"hasil_deteksi/{filename}")
+# --- EKSEKUSI UTAMA ---
+if __name__ == "__main__":
+    print("=" * 50)
+    print("=== SKRIP UJI COBA MODEL DETEKSI ===")
+    print("=" * 50)
 
-#         # Update hasil
-#         update_payload = {
-#             "status": "selesai",
-#             "url_hasil_deteksi": public_url,
-#             "waktu_proses": datetime.now().isoformat(),
-#             "accuracy": [round(o["akurasi"] * 100, 2) for o in detected_objects],
-#             "hama_deteksi": dict(detection_counts)
-#         }
-#         supabase.table("gambar_hama").update(update_payload).eq("id", job_id).execute()
-#         print(f"✅ Hasil deteksi disimpan untuk ID {job_id}: {detection_counts}")
+    # Buat folder input jika belum ada
+    if not os.path.exists(INPUT_FOLDER):
+        os.makedirs(INPUT_FOLDER)
+        print(f"📁 Folder '{INPUT_FOLDER}' telah dibuat.")
+        print("   Silakan letakkan gambar (.jpg, .jpeg, .png) di dalamnya.")
+        exit()
 
-#         os.remove(local_path)
-#     except Exception as e:
-#         print(f"❌ Error saat memproses gambar: {e}")
-#         supabase.table("gambar_hama").update({"status": "gagal"}).eq("id", job["id"]).execute()
+    model = load_yolo_model()
 
-# # --- HANDLER REALTIME ---
-# def on_message(ws, message):
-#     data = json.loads(message)
-#     if "event" in data and data["event"] == "INSERT":
-#         payload = data.get("payload", {})
-#         record = payload.get("record", {})
-#         if record.get("status") == "baru":
-#             process_image(record)
+    if model:
+        # Cari semua file gambar di folder input
+        image_paths = glob.glob(os.path.join(INPUT_FOLDER, '*.jpg')) + \
+                      glob.glob(os.path.join(INPUT_FOLDER, '*.jpeg')) + \
+                      glob.glob(os.path.join(INPUT_FOLDER, '*.png'))
 
-# def on_error(ws, error):
-#     print("⚠️ WebSocket error:", error)
-
-# def on_close(ws, close_status_code, close_msg):
-#     print("🔌 WebSocket terputus:", close_msg)
-#     # otomatis reconnect
-#     time.sleep(5)
-#     start_websocket()
-
-# def on_open(ws):
-#     print("✅ Realtime WebSocket terhubung!")
-#     # join channel realtime tabel gambar_hama
-#     join_msg = json.dumps({
-#         "topic": "realtime:public:gambar_hama",
-#         "event": "phx_join",
-#         "payload": {},
-#         "ref": "1"
-#     })
-#     ws.send(join_msg)
-#     print("📡 Subscribed ke tabel 'gambar_hama'")
-
-# # --- STARTING FUNCTION ---
-# def start_websocket():
-#     realtime_url = f"wss://wxkoqtcvkwduzfejtxib.supabase.co/realtime/v1/websocket?apikey={SUPABASE_SERVICE_KEY}&vsn=1.0.0"
-#     ws = websocket.WebSocketApp(
-#         realtime_url,
-#         on_message=on_message,
-#         on_error=on_error,
-#         on_close=on_close,
-#         on_open=on_open
-#     )
-#     threading.Thread(target=ws.run_forever, daemon=True).start()
-
-# # --- MAIN ---
-# if __name__ == "__main__":
-#     print("🚀 Menjalankan deteksi realtime Supabase...")
-#     start_websocket()
-
-#     while True:
-#         time.sleep(10)  # menjaga script tetap hidup
+        if not image_paths:
+            print(f"\n⚠️  Tidak ada gambar (.jpg, .jpeg, .png) di folder '{INPUT_FOLDER}'.")
+        else:
+            print(f"\n✅ Ditemukan {len(image_paths)} gambar. Memulai pengujian...\n")
+            for img_path in image_paths:
+                test_single_image(model, img_path)
+                print("-" * 50)
+        
+        print("\n🎉 Pengujian semua gambar selesai.")
