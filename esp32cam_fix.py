@@ -70,12 +70,17 @@ def get_pending_command(supabase):
 def capture_image_from_webcam(index=0):
     print(f"🎥 Membuka kamera index {index} ...")
     cap = cv2.VideoCapture(index)
+
     if not cap.isOpened():
         print("❌ Webcam tidak terdeteksi.")
         return None
 
-    # stabilisasi
-    time.sleep(1)
+    # ✅ Stabilkan kamera dengan membuang beberapa frame pertama
+    warmup_frames = 20
+    print(f"⏳ Menstabilkan kamera ({warmup_frames} frame)...")
+    for _ in range(warmup_frames):
+        cap.read()
+
     ret, frame = cap.read()
     cap.release()
 
@@ -83,7 +88,7 @@ def capture_image_from_webcam(index=0):
         print("❌ Gagal mengambil gambar dari webcam.")
         return None
 
-    print("📸 Gambar berhasil diambil dari webcam.")
+    print("📸 Gambar berhasil diambil dari webcam (sudah stabil).")
     return frame
 
 
