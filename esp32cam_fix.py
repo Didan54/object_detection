@@ -2,7 +2,7 @@ import os
 import time
 from datetime import datetime
 from supabase import create_client, Client
-import requests
+import httpx
 import cv2
 import numpy as np
 from ultralytics import YOLO
@@ -12,14 +12,12 @@ from collections import Counter
 SUPABASE_URL = "https://wxkoqtcvkwduzfejtxib.supabase.co"
 SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind4a29xdGN2a3dkdXpmZWp0eGliIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDIzNzcyNCwiZXhwIjoyMDc1ODEzNzI0fQ.ZAJBuiPV_FsNIQwiK40wZQ1vWLXzs-fMxFTEmYJUsqc"
 BUCKET_NAME = "gambar-hasil-deteksi"
-YOLO_MODEL_PATH = "best.pt"
+YOLO_MODEL_PATH = "best (7).pt"
 
-# --- KONFIGURASI PERANGKAT ---
 WEBCAM_INDEX = 0
-CHECK_INTERVAL = 5  
-DEFAULT_DISTANCE_M = 1.0  # ✅ jarak default untuk uji (ubah saat pengujian)
+CHECK_INTERVAL = 5
+DEFAULT_DISTANCE_M = 1.0  # hanya info pengujian, tidak dipakai lagi ke fokus
 
-# --- WARNA UNTUK KELAS DETEKSI ---
 COLOR_MAP = {
     "daun_sehat": (0, 255, 0),
     "daun_kuning": (0, 255, 255),
@@ -28,78 +26,44 @@ COLOR_MAP = {
     "bercak_daun": (255, 255, 0)
 }
 
-
-# === FUNGSI SUPABASE ===
+# === KONEKSI SUPABASE ===
 def initialize_supabase():
     try:
-        client: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
         print("✅ Terhubung ke Supabase.")
-        return client
+        return supabase
     except Exception as e:
-        print(f"❌ Gagal terhubung ke Supabase: {e}")
+        print("⚠️ Supabase gagal terhubung:", e)
         return None
 
-
 def delete_command(supabase, command_id):
-    try:
-        supabase.table("commands").delete().eq("id", command_id).execute()
-        print(f"🗑️ Perintah ID {command_id} dihapus dari database.")
-    except Exception as e:
-        print(f"⚠️ Gagal menghapus perintah: {e}")
-
+    supabase.table("commands").delete().eq("id", command_id).execute()
+    print(f"🗑️ Perintah ID {command_id} berhasil dihapus ✅")
 
 def get_pending_command(supabase):
     try:
-        resp = (
-            supabase.table("commands")
-            .select("id, action, user_id, created_at")
-            .order("created_at", desc=False)
-            .limit(1)
-            .execute()
-        )
-        if resp.data:
-            cmd = resp.data[0]
-            print(f"\n📩 Perintah baru ditemukan: {cmd}")
-            return cmd
-        return None
-    except Exception as e:
-        print(f"⚠️ Gagal membaca perintah: {e}")
+        resp = supabase.table("commands").select("*").order("created_at").limit(1).execute()
+        return resp.data[0] if resp.data else None
+    except Exception:
         return None
 
-
-# === SET FOKUS BERDASARKAN JARAK ===
-def set_focus_for_distance(cap, distance_m):
-    if distance_m <= 0.8:
-        focus_val = 10
-    elif distance_m <= 1.5:
-        focus_val = 30
-    elif distance_m <= 2.5:
-        focus_val = 45
-    else:
-        focus_val = 60  # jarak jauh, daun kecil
-
-    cap.set(cv2.CAP_PROP_FOCUS, focus_val)
-    print(f"🎯 Fokus diset {focus_val} untuk jarak {distance_m}m")
-
-
-# === FUNGSI KAMERA ===
-def capture_image_from_webcam(index=0, width=1280, height=720, distance_m=DEFAULT_DISTANCE_M):
-    print(f"🎥 Membuka kamera index {index} ...")
+# === CAMERA ===
+def capture_image_from_webcam(index=0, width=1280, height=720):
+    print(f"🎥 Membuka kamera index {index}...")
     cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
 
     if not cap.isOpened():
-        print("❌ Webcam tidak terdeteksi.")
+        print("❌ Webcam tidak ditemukan.")
         return None
 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
-    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
-    set_focus_for_distance(cap, distance_m)
+    # ✅ Autofocus AKTIF kembali
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
 
-    warmup_frames = 30
-    print(f"⏳ Menstabilkan kamera ({warmup_frames} frame)...")
-    for _ in range(warmup_frames):
+    # Stabilkan exposure & autofocus
+    for _ in range(30):
         cap.read()
         time.sleep(0.02)
 
@@ -107,133 +71,117 @@ def capture_image_from_webcam(index=0, width=1280, height=720, distance_m=DEFAUL
     cap.release()
 
     if not ret:
-        print("❌ Gagal mengambil gambar.")
+        print("❌ Gagal menangkap gambar.")
         return None
 
-    print("📸 Gambar berhasil diambil (stabil dan fokus).")
+    print("📸 Gambar berhasil diambil ✅")
     return frame
 
-
-# === FUNGSI YOLO ===
+# === YOLO MODEL ===
 def load_yolo_model():
-    try:
-        model = YOLO(YOLO_MODEL_PATH)
-        print("✅ Model YOLO siap.")
-        return model
-    except Exception as e:
-        print(f"❌ Model gagal dimuat: {e}")
-        exit()
+    return YOLO(YOLO_MODEL_PATH)
 
+def process_detection(model, image):
+    start = datetime.now()
+    results = model.predict(image, conf=0.5, verbose=False)
+    end = datetime.now()
 
-def process_detection(model, image_np):
-    print("🧠 Deteksi dimulai...")
-    start_yolo = datetime.now()
-    results = model.predict(image_np, conf=0.5, verbose=False)
-    end_yolo = datetime.now()
+    objects = []
+    annotated = image.copy()
 
-    detected_objects = []
-    annotated = image_np.copy()
+    for box in results[0].boxes:
+        cid = int(box.cls[0])
+        cname = model.names.get(cid, "unknown")
+        acc = float(box.conf[0])
+        objects.append({"nama": cname, "akurasi": acc})
 
-    if results and results[0].boxes:
-        for box in results[0].boxes:
-            class_id = int(box.cls[0])
-            class_name = model.names.get(class_id, "unknown")
-            confidence = float(box.conf[0])
-            detected_objects.append({"nama": class_name, "akurasi": confidence})
+        x1, y1, x2, y2 = map(int, box.xyxy[0])
+        color = COLOR_MAP.get(cname, (255,255,255))
+        cv2.rectangle(annotated, (x1,y1), (x2,y2), color, 2)
+        cv2.putText(annotated, f"{cname} ({acc*100:.1f}%)",
+                    (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-            color = COLOR_MAP.get(class_name, (255, 255, 255))
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-            label = f"{class_name} ({confidence*100:.1f}%)"
-            cv2.putText(annotated, label, (x1, max(y1 - 10, 15)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    print(f"✅ Deteksi selesai {(end-start).total_seconds():.2f}s")
+    return objects, annotated, start, end
 
-    print(f"✅ Deteksi selesai dalam {(end_yolo - start_yolo).total_seconds():.2f}s")
-    return detected_objects, annotated, (start_yolo, end_yolo)
+# === UPLOAD DATA ===
+def upload_and_save_results(supabase, img, anno, objects, user_id, time_log):
+    ts = datetime.now()
+    fname = ts.strftime("%Y%m%d_%H%M%S")
 
+    _, b1 = cv2.imencode(".jpg", img)
+    _, b2 = cv2.imencode(".jpg", anno)
 
-# === UPLOAD DAN SIMPAN DATA ===
-def upload_and_save_results(supabase, image, annotated, detected_objects, user_id, time_log):
-    start_upload = datetime.now()
-    timestamp = datetime.now()
-    filename = timestamp.strftime("%Y%m%d_%H%M%S")
+    supabase.storage.from_(BUCKET_NAME).upload(f"original/{fname}.jpg", b1.tobytes())
+    supabase.storage.from_(BUCKET_NAME).upload(f"hasil_deteksi/{fname}.jpg", b2.tobytes())
 
-    _, buf_orig = cv2.imencode(".jpg", image)
-    _, buf_anno = cv2.imencode(".jpg", annotated)
+    url_orig = supabase.storage.from_(BUCKET_NAME).get_public_url(f"original/{fname}.jpg")
+    url_anno = supabase.storage.from_(BUCKET_NAME).get_public_url(f"hasil_deteksi/{fname}.jpg")
 
-    try:
-        supabase.storage.from_(BUCKET_NAME).upload(f"original/{filename}.jpg", buf_orig.tobytes())
-        supabase.storage.from_(BUCKET_NAME).upload(f"hasil_deteksi/{filename}.jpg", buf_anno.tobytes())
-
-        url_orig = supabase.storage.from_(BUCKET_NAME).get_public_url(f"original/{filename}.jpg")
-        url_anno = supabase.storage.from_(BUCKET_NAME).get_public_url(f"hasil_deteksi/{filename}.jpg")
-
-        print("✅ Upload gambar berhasil.")
-    except Exception as e:
-        print("⚠ Upload gagal:", e)
-        return False
-
-    detection_counts = Counter(obj["nama"] for obj in detected_objects)
+    counts = Counter(o["nama"] for o in objects)
 
     payload = {
-        "timestamp": timestamp.isoformat(),
+        "timestamp": ts.isoformat(),
         "image_url": url_orig,
         "url_hasil_deteksi": url_anno,
-        "accuracy": [round(obj["akurasi"] * 100, 2) for obj in detected_objects],
-        "hama_deteksi": dict(detection_counts),
+        "accuracy": [round(o["akurasi"]*100,2) for o in objects],
+        "hama_deteksi": dict(counts),
         "status": "selesai",
         "user_id": user_id,
-        "waktu_proses": {
-            "ambil_perintah": time_log["ambil_perintah"].isoformat(),
-            "mulai_deteksi": time_log["mulai_deteksi"].isoformat(),
-            "selesai_deteksi": time_log["selesai_deteksi"].isoformat(),
-            "mulai_upload": start_upload.isoformat(),
-            "selesai_upload": datetime.now().isoformat()
-        }
+        "log_waktu": time_log
     }
 
     supabase.table("gambar_hama").insert(payload).execute()
-    print("📤 Data deteksi disimpan.")
-    return True
+    print("📤 Hasil deteksi disimpan ✅")
 
-
-# === LOOP ===
-def main_loop(model):
-    print("\n🔄 Sistem Deteksi Siap Berjalan 🔄")
+# === LOOP UTAMA ===
+def main_loop():
     supabase = initialize_supabase()
+    model = load_yolo_model()
 
     while True:
         try:
             cmd = get_pending_command(supabase)
             if cmd and cmd.get("action") == "capture":
-                user_id = cmd["user_id"]
-                cmd_id = cmd["id"]
+                uid = cmd["user_id"]
+                cid = cmd["id"]
+                print(f"\n🚀 Perintah dari user {uid}")
 
-                print(f"\n🚀 Mulai proses user {user_id}")
+                time_log = {
+                    "ambil_perintah": datetime.now().isoformat()
+                }
 
-                time_log = {"ambil_perintah": datetime.now()}
+                frame = capture_image_from_webcam()
+                if frame is None: continue
 
-                frame = capture_image_from_webcam(WEBCAM_INDEX, distance_m=DEFAULT_DISTANCE_M)
-                if frame is None:
-                    continue
+                objs, anno, t1, t2 = process_detection(model, frame)
+                time_log["mulai_deteksi"] = t1.isoformat()
+                time_log["selesai_deteksi"] = t2.isoformat()
+                time_log["mulai_upload"] = datetime.now().isoformat()
 
-                objs, annotated, det_time = process_detection(model, frame)
-                time_log["mulai_deteksi"] = det_time[0]
-                time_log["selesai_deteksi"] = det_time[1]
+                upload_and_save_results(supabase, frame, anno, objs, uid, time_log)
 
-                if upload_and_save_results(supabase, frame, annotated, objs, user_id, time_log):
-                    delete_command(supabase, cmd_id)
+                time_log["selesai_upload"] = datetime.now().isoformat()
+
+                delete_command(supabase, cid)
 
             else:
                 print(".", end="", flush=True)
 
             time.sleep(CHECK_INTERVAL)
 
-        except Exception as e:
-            print("\n⚠ Error:", e)
+        except httpx.ConnectError:
+            print("\n🌐 Koneksi internet putus! Reconnect...")
+            supabase = initialize_supabase()
             time.sleep(5)
 
+        except KeyboardInterrupt:
+            print("\n🛑 Sistem dihentikan oleh pengguna ✅")
+            break
+
+        except Exception as e:
+            print("\n⚠ ERROR:", e)
+            time.sleep(3)
 
 if __name__ == "__main__":
-    model = load_yolo_model()
-    main_loop(model)
+    main_loop()
