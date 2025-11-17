@@ -12,11 +12,9 @@ from collections import Counter
 SUPABASE_URL = "https://wxkoqtcvkwduzfejtxib.supabase.co"
 SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind4a29xdGN2a3dkdXpmZWp0eGliIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDIzNzcyNCwiZXhwIjoyMDc1ODEzNzI0fQ.ZAJBuiPV_FsNIQwiK40wZQ1vWLXzs-fMxFTEmYJUsqc"
 BUCKET_NAME = "gambar-hasil-deteksi"
-YOLO_MODEL_PATH = "best (7).pt"
+YOLO_MODEL_PATH = "best (8).pt"
 
-WEBCAM_INDEX = 0
 CHECK_INTERVAL = 5
-DEFAULT_DISTANCE_M = 1.0  # hanya info pengujian, tidak dipakai lagi ke fokus
 
 COLOR_MAP = {
     "daun_sehat": (0, 255, 0),
@@ -46,84 +44,101 @@ def get_pending_command(supabase):
         return resp.data[0] if resp.data else None
     except Exception:
         return None
-
+    
 # === CAMERA ===
-def capture_image_from_webcam(index=0, width=1920, height=1080):
+def capture_image_from_webcam(
+    index=0, 
+    width=1920, 
+    height=1080,
+    exposure=-8,
+    auto_exposure=0.25,
+    brightness=128,
+    contrast=128,
+    saturation=128,
+    sharpness=128,
+    gain=0,
+    auto_focus=1,
+    auto_white_balance=0,
+    wb_temperature=4000
+):
     print(f"🎥 Membuka kamera index {index}...")
-    cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
+    cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
 
     if not cap.isOpened():
         print("❌ Webcam tidak ditemukan.")
         return None
 
-    # ✅ Set resolusi tinggi
+    # ---- RESOLUSI ----
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
-    # ✅ Autofocus ON
-    cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+    # ---- AUTO FOCUS ----
+    try:
+        cap.set(cv2.CAP_PROP_AUTOFOCUS, auto_focus)
+    except:
+        pass
 
-    # ✅ Exposure & white balance manual (lebih stabil)
-    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # 0.25 = manual mode pada webcam Logitech
-    cap.set(cv2.CAP_PROP_EXPOSURE, -6)  # sesuaikan: range biasanya -1 sampai -13
-    cap.set(cv2.CAP_PROP_AUTO_WB, 0)    # White balance manual
-    cap.set(cv2.CAP_PROP_WB_TEMPERATURE, 5000)  # Mid temperature, bisa diatur di outdoor
+    # ---- EXPOSURE ----
+    try:
+        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, auto_exposure)
+        cap.set(cv2.CAP_PROP_EXPOSURE, exposure)
+    except:
+        pass
 
-    # ✅ Stabilkan (buang frame)
-    for _ in range(50):
+    # ---- BRIGHTNESS ----
+    try:
+        cap.set(cv2.CAP_PROP_BRIGHTNESS, brightness)
+    except:
+        pass
+
+    # ---- CONTRAST ----
+    try:
+        cap.set(cv2.CAP_PROP_CONTRAST, contrast)
+    except:
+        pass
+
+    # ---- SATURATION ----
+    try:
+        cap.set(cv2.CAP_PROP_SATURATION, saturation)
+    except:
+        pass
+
+    # ---- SHARPNESS ----
+    try:
+        cap.set(cv2.CAP_PROP_SHARPNESS, sharpness)
+    except:
+        pass
+
+    # ---- GAIN ----
+    try:
+        cap.set(cv2.CAP_PROP_GAIN, gain)
+    except:
+        pass
+
+    # ---- WHITE BALANCE ----
+    try:
+        cap.set(cv2.CAP_PROP_AUTO_WB, auto_white_balance)
+        if auto_white_balance == 0:
+            cap.set(cv2.CAP_PROP_WB_TEMPERATURE, wb_temperature)
+    except:
+        pass
+
+    # ---- BUANG 30 FRAME (stabilkan exposure) ----
+    for _ in range(30):
         cap.read()
-        time.sleep(0.03)
+        time.sleep(0.02)
 
+    # ---- FINAL GRAB ----
     ret, frame = cap.read()
     cap.release()
 
-    if not ret or frame is None:
+    if not ret:
         print("❌ Gagal menangkap gambar.")
         return None
 
-    # ✅ Enhancement untuk daun dan tekstur penyakit
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    hsv[:,:,2] = cv2.equalizeHist(hsv[:,:,2])  # tingkatkan detail brightness
-    frame = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-
-    # Sharpen
-    kernel = np.array([[0, -1, 0],
-                       [-1, 5,-1],
-                       [0, -1, 0]])
-    frame = cv2.filter2D(frame, -1, kernel)
-
-    print("📸 Gambar berhasil diambil ✅ (Enhanced Mode)")
+    print("📸 Gambar berhasil diambil ✅")
     return frame
 
-# # === CAMERA ===
-# def capture_image_from_webcam(index=0, width=1920, height=1080):
-#     print(f"🎥 Membuka kamera index {index}...")
-#     cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
-
-#     if not cap.isOpened():
-#         print("❌ Webcam tidak ditemukan.")
-#         return None
-
-#     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-#     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-
-#     # ✅ Autofocus AKTIF kembali
-#     cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
-
-#     # Stabilkan exposure & autofocus
-#     for _ in range(50):
-#         cap.read()
-#         time.sleep(0.03)
-
-#     ret, frame = cap.read()
-#     cap.release()
-
-#     if not ret:
-#         print("❌ Gagal menangkap gambar.")
-#         return None
-
-#     print("📸 Gambar berhasil diambil ✅")
-#     return frame
 
 # === YOLO MODEL ===
 def load_yolo_model():
