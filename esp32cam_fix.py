@@ -46,97 +46,27 @@ def get_pending_command(supabase):
         return None
     
 # === CAMERA ===
-def capture_image_from_webcam(
-    index=0, 
-    width=1920, 
-    height=1080,
-    exposure=-8,
-    auto_exposure=0.25,
-    brightness=128,
-    contrast=128,
-    saturation=128,
-    sharpness=128,
-    gain=0,
-    auto_focus=1,
-    auto_white_balance=0,
-    wb_temperature=4000
-):
+def capture_image_from_webcam(index=1):
     print(f"🎥 Membuka kamera index {index}...")
     cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
 
     if not cap.isOpened():
-        print("❌ Webcam tidak ditemukan.")
+        print("❌ Kamera tidak ditemukan.")
         return None
 
-    # ---- RESOLUSI ----
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-
-    # ---- AUTO FOCUS ----
-    try:
-        cap.set(cv2.CAP_PROP_AUTOFOCUS, auto_focus)
-    except:
-        pass
-
-    # ---- EXPOSURE ----
-    try:
-        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, auto_exposure)
-        cap.set(cv2.CAP_PROP_EXPOSURE, exposure)
-    except:
-        pass
-
-    # ---- BRIGHTNESS ----
-    try:
-        cap.set(cv2.CAP_PROP_BRIGHTNESS, brightness)
-    except:
-        pass
-
-    # ---- CONTRAST ----
-    try:
-        cap.set(cv2.CAP_PROP_CONTRAST, contrast)
-    except:
-        pass
-
-    # ---- SATURATION ----
-    try:
-        cap.set(cv2.CAP_PROP_SATURATION, saturation)
-    except:
-        pass
-
-    # ---- SHARPNESS ----
-    try:
-        cap.set(cv2.CAP_PROP_SHARPNESS, sharpness)
-    except:
-        pass
-
-    # ---- GAIN ----
-    try:
-        cap.set(cv2.CAP_PROP_GAIN, gain)
-    except:
-        pass
-
-    # ---- WHITE BALANCE ----
-    try:
-        cap.set(cv2.CAP_PROP_AUTO_WB, auto_white_balance)
-        if auto_white_balance == 0:
-            cap.set(cv2.CAP_PROP_WB_TEMPERATURE, wb_temperature)
-    except:
-        pass
-
-    # ---- BUANG 30 FRAME (stabilkan exposure) ----
-    for _ in range(30):
+    # Buang beberapa frame untuk stabilisasi
+    for _ in range(10):
         cap.read()
-        time.sleep(0.02)
 
-    # ---- FINAL GRAB ----
+    # Ambil frame final
     ret, frame = cap.read()
     cap.release()
 
-    if not ret:
+    if not ret or frame is None:
         print("❌ Gagal menangkap gambar.")
         return None
 
-    print("📸 Gambar berhasil diambil ✅")
+    print("📸 Gambar berhasil diambil")
     return frame
 
 
