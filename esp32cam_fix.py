@@ -46,9 +46,9 @@ def get_pending_command(supabase):
         return None
     
 # === CAMERA ===
-def capture_image_from_webcam(index=1):
-    print(f"🎥 Membuka kamera index {index}...")
-    cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+def capture_image_from_webcam(url="http://10.84.193.134:8080/video"):
+    print(f"🎥 Membuka kamera ")
+    cap = cv2.VideoCapture(url)
 
     if not cap.isOpened():
         print("❌ Kamera tidak ditemukan.")
