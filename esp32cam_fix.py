@@ -12,7 +12,7 @@ from collections import Counter
 SUPABASE_URL = "https://wxkoqtcvkwduzfejtxib.supabase.co"
 SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind4a29xdGN2a3dkdXpmZWp0eGliIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDIzNzcyNCwiZXhwIjoyMDc1ODEzNzI0fQ.ZAJBuiPV_FsNIQwiK40wZQ1vWLXzs-fMxFTEmYJUsqc"
 BUCKET_NAME = "gambar-hasil-deteksi"
-YOLO_MODEL_PATH = "best (8).pt"
+YOLO_MODEL_PATH = "best_final.pt"
 
 CHECK_INTERVAL = 5
 
@@ -46,19 +46,39 @@ def get_pending_command(supabase):
         return None
     
 # === CAMERA ===
-def capture_image_from_webcam(url="http://10.84.193.134:8080/video"):
-    print(f"🎥 Membuka kamera ")
-    cap = cv2.VideoCapture(url)
+def capture_image_from_webcam(index=0):
+    print(f"🎥 Membuka kamera (Index: {index})")
+    
+    # Menggunakan CAP_V4L2 khusus untuk sistem Linux
+    cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
 
     if not cap.isOpened():
-        print("❌ Kamera tidak ditemukan.")
+        print("❌ Kamera tidak ditemukan atau sedang digunakan.")
         return None
 
-    # Buang beberapa frame untuk stabilisasi
-    for _ in range(10):
-        cap.read()
+    # --- PENGATURAN HARDWARE MANUAL ---
+    # 1. Resolusi
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-    # Ambil frame final
+    # 2. Fokus
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 1) # Auto focus tetap nyala
+
+    # 3. Exposure Manual
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) # 1 = Manual Mode di V4L2 (0.25 sering digunakan di Windows)
+    cap.set(cv2.CAP_PROP_EXPOSURE, -6)      # Nilai exposure manual
+
+    # 4. White Balance Manual
+    cap.set(cv2.CAP_PROP_AUTO_WB, 0)         # Matikan Auto WB
+    cap.set(cv2.CAP_PROP_WB_TEMPERATURE, 4000) # Set WB ke 4000
+
+    # --- PROSES PENGAMBILAN GAMBAR ---
+    print("   Stabilkan kamera (warm-up)...")
+    # Loop untuk membuang frame awal agar sensor stabil dengan pengaturan baru
+    for _ in range(30):
+        cap.read()
+        time.sleep(0.02)
+
     ret, frame = cap.read()
     cap.release()
 
@@ -66,7 +86,7 @@ def capture_image_from_webcam(url="http://10.84.193.134:8080/video"):
         print("❌ Gagal menangkap gambar.")
         return None
 
-    print("📸 Gambar berhasil diambil")
+    print("📸 Gambar berhasil diambil ✅")
     return frame
 
 
