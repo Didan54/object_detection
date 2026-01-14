@@ -50,7 +50,7 @@ def capture_image_from_webcam(index=0):
     print(f"🎥 Membuka kamera (Index: {index})")
     
     # Menggunakan CAP_V4L2 khusus untuk sistem Linux
-    cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
 
     if not cap.isOpened():
         print("❌ Kamera tidak ditemukan atau sedang digunakan.")
@@ -65,12 +65,10 @@ def capture_image_from_webcam(index=0):
     cap.set(cv2.CAP_PROP_AUTOFOCUS, 1) # Auto focus tetap nyala
 
     # 3. Exposure Manual
-    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) # 1 = Manual Mode di V4L2 (0.25 sering digunakan di Windows)
-    cap.set(cv2.CAP_PROP_EXPOSURE, -6)      # Nilai exposure manual
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) 
 
     # 4. White Balance Manual
-    cap.set(cv2.CAP_PROP_AUTO_WB, 0)         # Matikan Auto WB
-    cap.set(cv2.CAP_PROP_WB_TEMPERATURE, 4000) # Set WB ke 4000
+    cap.set(cv2.CAP_PROP_AUTO_WB, 3)         # Auto WB
 
     # --- PROSES PENGAMBILAN GAMBAR ---
     print("   Stabilkan kamera (warm-up)...")
