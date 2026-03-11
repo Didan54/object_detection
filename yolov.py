@@ -1,5 +1,6 @@
 import os
 import time
+import threading
 from datetime import datetime
 from supabase import create_client, Client
 import httpx
@@ -46,47 +47,58 @@ def get_pending_command(supabase):
         return None
     
 # === CAMERA ===
-def capture_image_from_webcam(index=1):
-    print(f"🎥 Membuka kamera (Index: {index})")
-    
-    # Menggunakan CAP_V4L2 khusus untuk sistem Linux
-    cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+class CameraStream:
+    def __init__(self, index=0):
+        print(f"🎥 Membuka dan menginisialisasi kamera (Index: {index})...")
+        self.cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+        
+        self.ret = False
+        self.frame = None
+        self.running = False
 
-    if not cap.isOpened():
-        print("❌ Kamera tidak ditemukan atau sedang digunakan.")
-        return None
+        if not self.cap.isOpened():
+            print("❌ Kamera tidak ditemukan atau sedang digunakan.")
+            return
 
-    # --- PENGATURAN HARDWARE MANUAL ---
-    # 1. Resolusi
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        # --- PENGATURAN HARDWARE MANUAL ---
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+        self.cap.set(cv2.CAP_PROP_AUTO_WB, 3)
 
-    # 2. Fokus
-    cap.set(cv2.CAP_PROP_AUTOFOCUS, 1) # Auto focus tetap nyala
+        print("   Stabilkan kamera (warm-up)...")
+        for _ in range(30):
+            self.cap.read()
+            time.sleep(0.02)
 
-    # 3. Exposure Manual
-    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) 
+        self.ret, self.frame = self.cap.read()
+        self.running = True
 
-    # 4. White Balance Manual
-    cap.set(cv2.CAP_PROP_AUTO_WB, 3)         # Auto WB
+        # Memulai thread terpisah khusus untuk streaming kamera
+        self.thread = threading.Thread(target=self.update, args=())
+        self.thread.daemon = True
+        self.thread.start()
+        print("🎥 Kamera berhasil berjalan (Standby) ✅")
 
-    # --- PROSES PENGAMBILAN GAMBAR ---
-    print("   Stabilkan kamera (warm-up)...")
-    # Loop untuk membuang frame awal agar sensor stabil dengan pengaturan baru
-    for _ in range(30):
-        cap.read()
-        time.sleep(0.02)
+    def update(self):
+        # Terus perbarui frame dari kamera selama program jalan
+        while self.running:
+            self.ret, self.frame = self.cap.read()
 
-    ret, frame = cap.read()
-    cap.release()
+    def read(self):
+        # Ambil frame yang paling baru saat dipanggil
+        if self.frame is not None:
+            return self.ret, self.frame.copy()
+        return self.ret, None
 
-    if not ret or frame is None:
-        print("❌ Gagal menangkap gambar.")
-        return None
-
-    print("📸 Gambar berhasil diambil ✅")
-    return frame
-
+    def stop(self):
+        # Menghentikan kamera saat program dimatikan
+        self.running = False
+        if hasattr(self, 'thread'):
+            self.thread.join()
+        self.cap.release()
+        print("🛑 Kamera dihentikan dengan aman.")
 
 # === YOLO MODEL ===
 def load_yolo_model():
@@ -149,6 +161,12 @@ def upload_and_save_results(supabase, img, anno, objects, user_id, time_log):
 def main_loop():
     supabase = initialize_supabase()
     model = load_yolo_model()
+    
+    cam = CameraStream(index=1)
+    
+    if not cam.running:
+        print("Sistem berhenti karena kamera gagal dimuat.")
+        return
 
     while True:
         try:
@@ -162,8 +180,11 @@ def main_loop():
                     "ambil_perintah": datetime.now().isoformat()
                 }
 
-                frame = capture_image_from_webcam()
-                if frame is None: continue
+                ret, frame = cam.read()
+                if not ret or frame is None:
+                    print("❌ Gagal menangkap gambar dari stream.")
+                    continue
+                print("📸 Gambar berhasil diambil dari stream ✅")
 
                 objs, anno, t1, t2 = process_detection(model, frame)
                 time_log["mulai_deteksi"] = t1.isoformat()
@@ -193,6 +214,8 @@ def main_loop():
         except Exception as e:
             print("\n⚠ ERROR:", e)
             time.sleep(3)
+            
+    cam.stop()
 
 if __name__ == "__main__":
     main_loop()
